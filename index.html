@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>粒子圣诞树 - 增大雪花与树底密度</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000; /* 全黑背景 */
+            font-family: sans-serif;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 0 0 5px #000;
+        }
+        
+        /* 缩放控制按钮容器 */
+        #controls {
+            position: fixed; 
+            bottom: 20px; /* 距离底部 20px */
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            
+            /* Flexbox 布局用于居中和间距 */
+            display: flex;
+            gap: 15px; 
+            padding: 10px 20px; 
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 10px;
+        }
+        .control-btn {
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            /* 增大尺寸，方便触摸 */
+            width: 50px; 
+            height: 50px; 
+            
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            
+            cursor: pointer;
+            border-radius: 50%; /* 圆形按钮 */
+            font-size: 24px; /* 增大图标尺寸 */
+            transition: background-color 0.3s, border-color 0.3s, transform 0.1s;
+            margin: 0; 
+        }
+        .control-btn:hover {
+            background-color: rgba(255, 255, 255, 0.4);
+            border-color: white;
+            transform: scale(1.05);
+        }
+        
+        /* 音乐控制区域 - 固定在左下角 */
+        #music-area-container {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 11; /* 确保它在其他控件之上 */
+            display: flex; /* 启用 Flexbox */
+            align-items: center;
+            gap: 10px; /* 按钮和进度条之间的间距 */
+        }
+
+        /* 进度条容器 */
+        #audio-progress-bar-container {
+            width: 150px; /* 长条 */
+            height: 8px; 
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            cursor: pointer;
+            overflow: hidden;
+            box-shadow: 0 0 5px rgba(255, 255, 255, 0.3);
+            /* 确保进度条在垂直方向上与按钮居中 */
+            align-self: center; 
+        }
+        
+        /* 进度条填充 */
+        #audio-progress-bar-fill {
+            height: 100%;
+            width: 0%; /* 初始宽度为 0 */
+            background-color: #ff69b4; /* 粉色 (Hot Pink) */
+            transition: width 0.1s linear; /* 平滑过渡 */
+            border-radius: 4px;
+        }
+
+        /* 激活时的播放状态指示 */
+        #musicPlayBtn.playing {
+            background-color: rgba(60, 255, 60, 0.3); /* 绿色指示 */
+            border-color: #3cff3c;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* 手机端信息文字适配 */
+        @media (max-width: 600px) {
+            #info {
+                font-size: 12px;
+                top: 5px;
+            }
+            #controls {
+                gap: 10px;
+            }
+            #music-area-container {
+                bottom: 10px;
+                left: 10px;
+            }
+            #audio-progress-bar-container {
+                 width: 80px; /* 手机端稍微缩短 */
+            }
+        }
+    </style>
+    
+    <!-- 引入 Font Awesome 图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <audio id="bgMusic" loop>
+        <source src="http://ldjy.asc.jx.cn/christmas.mp3" type="audio/mp3">
+    </audio>
+
+    <div id="info">拖动鼠标旋转场景 • 滚轮缩放</div>
+    
+    <!-- 音乐控制区域 -->
+    <div id="music-area-container">
+        <!-- 默认显示播放图标 -->
+        <button id="musicPlayBtn" class="control-btn" aria-label="播放/暂停音乐">
+            <i class="fas fa-play"></i>
+        </button>
+        <!-- 音频进度条 -->
+        <div id="audio-progress-bar-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+            <div id="audio-progress-bar-fill"></div>
+        </div>
+    </div>
+
+    <!-- 缩放控制按钮 (已对调顺序) -->
+    <div id="controls">
+        <!-- 放大按钮：放在左侧，更符合直觉 -->
+        <button id="zoomInBtn" class="control-btn" aria-label="放大"><i class="fas fa-plus"></i></button>
+        <!-- 缩小按钮：放在右侧 -->
+        <button id="zoomOutBtn" class="control-btn" aria-label="缩小"><i class="fas fa-minus"></i></button>
+    </div>
+
+    <script>
+        // --- Global Variables ---
+        let scene, camera, renderer, controls;
+        let particleTree, heartTopper, magicParticles, waveBase;
+        let snowSystem, snowGeo;
+        const clock = new THREE.Clock();
+        
+        let snowflakeTexture; 
+        
+        // 树干粒子和总粒子数量
+        const TOTAL_TREE_PARTICLES = 75000; 
+        
+        // 树干尺寸参数 (用于颜色和形状的渐变参考)
+        const VIRTUAL_TRUNK_HEIGHT = 8; 
+        const VIRTUAL_TRUNK_RADIUS = 3; 
+        
+        // 树的起始Y轴位置，用于底部留出间隙
+        const TREE_BASE_Y = 10; 
+
+        // Configuration Parameters
+        const params = {
+            snowCount: 3500,        
+            magicCount: 350,        
+            treeParticleCount: TOTAL_TREE_PARTICLES, 
+            heartParticleCount: 10000,  
+            waveParticleCount: 12000, 
+            waveRadius: 90, 
+            heartRotationSpeed: 0.015,
+            TREE_HEIGHT: 50, // 圣诞树的高度
+            HEART_SCALE: 4.5, // 爱心模型的缩放比例
+            
+            // 树木层级调整: 减少分支数量，层级更少 (现在主要通过幂函数控制密度)
+            TREE_BRANCHES: 10, 
+            
+            // 魔力粒子旋转半径调整 
+            MAGIC_BASE_RADIUS: 15, 
+        };
+
+        // --- 粒子贴图创建 ---
+        // 用于雪花的棱角贴图
+        function createSnowflakeTexture() {
+            if (snowflakeTexture) return snowflakeTexture; 
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; 
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+            ctx.translate(32, 32);
+
+            // 绘制一个带有明显棱角的六角形/雪花形状
+            const numPoints = 6;
+            const outerRadius = 30;
+            const innerRadius = 10; 
+            
+            ctx.beginPath();
+            for(let i = 0; i < numPoints * 2; i++) {
+                const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                const angle = (i / (numPoints * 2)) * Math.PI * 2 + Math.PI / numPoints; 
+                const x = radius * Math.cos(angle);
+                const y = radius * Math.sin(angle);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.closePath();
+            ctx.fill();
+            
+            // 增加中心光斑
+            ctx.beginPath();
+            ctx.arc(0, 0, 8, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.shadowBlur = 4;
+            ctx.shadowColor = 'white';
+            ctx.fill();
+
+            snowflakeTexture = new THREE.CanvasTexture(canvas);
+            return snowflakeTexture;
+        }
+
+        // 创建圆形光斑贴图（用于树和爱心）
+        function createParticleTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; 
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            
+            const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.05, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 64, 64);
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // Initialize Scene
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000); 
+
+            // 初始播放视角调整
+            camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 45, 120); 
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+            renderer.sortObjects = false;
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 - 0.1;
+            // 调整目标点，使树底间隙可见
+            controls.target.set(0, TREE_BASE_Y + params.TREE_HEIGHT / 2, 0); 
+
+            setupLighting(); 
+            createWaveBase();
+            createParticleTree(); 
+            createHeartTopper();  
+            createSnowSystem();
+            createMagicDust();
+            setupMusicControl(); // 设置音乐控制
+
+            window.addEventListener('resize', onWindowResize, false);
+            // 按钮事件监听不需要修改，因为 ID 没有变
+            document.getElementById('zoomInBtn').addEventListener('click', () => adjustCameraZoom(5));
+            document.getElementById('zoomOutBtn').addEventListener('click', () => adjustCameraZoom(-5));
+        }
+
+        function setupLighting() {
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.1); 
+            scene.add(ambientLight);
+        }
+
+        function adjustCameraZoom(delta) {
+            camera.fov += delta;
+            camera.fov = Math.max(10, Math.min(90, camera.fov)); 
+            camera.updateProjectionMatrix();
+        }
+
+        // --- Circular Propagating Wave Particle Base ---
+        function createWaveBase() {
+            const waveGeo = new THREE.BufferGeometry();
+            const positions = [];
+            const colors = [];
+            const sizes = [];
+            const initialRadius = []; 
+            const color = new THREE.Color();
+            
+            const range = params.waveRadius; 
+
+            for (let i = 0; i < params.waveParticleCount; i++) {
+                const radius = Math.random() * range; 
+                const angle = Math.random() * Math.PI * 2;
+                
+                const x = Math.cos(angle) * radius;
+                // 波浪基座保持在 Y=0
+                const z = Math.sin(angle) * radius;
+                
+                positions.push(x, 0, z); 
+                initialRadius.push(radius);
+
+                // 五颜六色的波浪粒子
+                const hue = Math.random(); 
+                const saturation = 0.8; 
+                const lightness = 0.6 + (Math.random() * 0.2); 
+                
+                color.setHSL(hue, saturation, lightness);
+                colors.push(color.r, color.g, color.b);
+
+                // 调大粒子大小，使波纹更明显
+                sizes.push(Math.random() * 3.0 + 2.0); 
+            }
+
+            waveGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            waveGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            waveGeo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+            waveGeo.userData = { initialRadius }; 
+
+            const waveMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: new THREE.Color(0xffffff) },
+                    pointTexture: { value: createParticleTexture() }, // 使用圆形光斑贴图
+                    alphaTest: { value: 0.9 }
+                },
+                vertexShader: `
+                    attribute float size;
+                    varying vec3 vColor;
+                    void main() {
+                        vColor = color;
+                        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+                        gl_PointSize = size * ( 150.0 / -mvPosition.z ); 
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    uniform sampler2D pointTexture;
+                    varying vec3 vColor;
+                    void main() {
+                        gl_FragColor = vec4( color * vColor, 1.0 );
+                        gl_FragColor = gl_FragColor * texture2D( pointTexture, gl_PointCoord );
+                        gl_FragColor.a *= 0.8; 
+                        if (gl_FragColor.a < 0.05) discard; 
+                    }
+                `,
+                blending: THREE.AdditiveBlending, 
+                depthWrite: false,
+                transparent: true,
+                vertexColors: true 
+            });
+
+            waveBase = new THREE.Points(waveGeo, waveMat);
+            scene.add(waveBase);
+        }
+
+        // --- Particle Christmas Tree ---
+        function createParticleTree() {
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const colors = [];
+            const sizes = [];
+            const initialOffsets = []; 
+            const layerOffsets = []; 
+            
+            const originalPositions = [];
+            geometry.userData = { originalPositions, initialOffsets, layerOffsets }; 
+
+            const color = new THREE.Color();
+            const treeHeight = params.TREE_HEIGHT; // 50
+            const baseRadius = 25; 
+            
+            for (let i = 0; i < params.treeParticleCount; i++) {
+                const isOrnament = Math.random() < 0.12; 
+                
+                // --- MODIFICATION: 树靠近底层的粒子调多一点 (使用幂函数偏置) ---
+                // 1.0 - Math.pow(Math.random(), 0.5) 偏向 0 (底部)
+                const biasFactor = 1.0 - Math.pow(Math.random(), 0.5); 
+                let y = biasFactor * treeHeight;
+                
+                // Add jitter and ensure non-negative
+                y += (Math.random() - 0.5) * 1.0;
+                y = Math.max(0, y); 
+                // --- END MODIFICATION ---
+
+                const t = 1 - (y / treeHeight); 
+                
+                // --- 粒子半径和平滑过渡 ---
+                
+                const foliageRadiusCalc = baseRadius * t * (0.3 + Math.random() * 0.7);
+                const trunkRadiusCalc = VIRTUAL_TRUNK_RADIUS * (1 - y / VIRTUAL_TRUNK_HEIGHT * 0.5) * (0.5 + Math.random() * 0.5);
+
+                let alphaRadius;
+                if (y > VIRTUAL_TRUNK_HEIGHT) {
+                    alphaRadius = 1.0;
+                } else {
+                    alphaRadius = y / VIRTUAL_TRUNK_HEIGHT;
+                    alphaRadius = alphaRadius * alphaRadius; 
+                }
+                
+                let currentRadius = trunkRadiusCalc + (foliageRadiusCalc - trunkRadiusCalc) * alphaRadius;
+
+                const foliageSizeBase = Math.random() * 1.2 + 0.6;
+                const trunkSizeBase = Math.random() * 1.8 + 1.2;
+                sizes.push(trunkSizeBase + (foliageSizeBase - trunkSizeBase) * alphaRadius);
+
+
+                let angle = (y * 5) + Math.random() * Math.PI * 2; 
+                
+                const r = Math.random() * currentRadius; 
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+
+                // --- 树纹理模拟 ---
+                const textureWaviness = Math.sin(y * 5 + angle * 3) * 0.2; 
+                const noiseFactor = Math.random() * 0.5 + 0.5; 
+
+                const finalX = x + textureWaviness * Math.cos(angle) * noiseFactor * 0.5;
+                const finalZ = z + textureWaviness * Math.sin(angle) * noiseFactor * 0.5;
+                const finalY = y + Math.sin(y * 30) * 0.05 * (1 - r / currentRadius); 
+                
+                // 应用 TREE_BASE_Y 偏移，使树的底部抬高
+                positions.push(finalX, finalY + TREE_BASE_Y, finalZ); 
+                originalPositions.push(finalX, finalY + TREE_BASE_Y, finalZ);
+                initialOffsets.push(Math.random() * Math.PI * 2);
+                layerOffsets.push(Math.random() * Math.PI * 2); 
+
+                
+                if (isOrnament) {
+                    // 装饰物颜色逻辑不变
+                    const isRed = Math.random() < 0.7;
+                    if (isRed) {
+                        color.setHSL(Math.random() * 0.05, 1.0, 0.8 + Math.random() * 0.1);
+                    } else {
+                        color.setHSL(0.14 + Math.random() * 0.05, 1.0, 0.7 + Math.random() * 0.2);
+                    }
+                    sizes[i] = Math.random() * 1.5 + 0.8; 
+                } else {
+                    // --- 颜色混合逻辑 (深绿色树叶) ---
+                    let hue, saturation, lightness;
+
+                    // 树干目标颜色 (#4f1f0b -> H:0.044, S:0.75, L:0.18)
+                    const H_TRUNK = 0.044 + Math.random() * 0.01; 
+                    const S_TRUNK = 0.75 + Math.random() * 0.15; 
+                    const L_TRUNK = 0.18 + Math.random() * 0.05;
+
+                    // 树叶目标颜色 (深绿色)
+                    const H_FOLIAGE = 0.33;
+                    const S_FOLIAGE = 0.8;
+                    const L_FOLIAGE_BASE = 0.22; // 颜色加深
+                    const L_FOLIAGE_GRADIENT = (y - VIRTUAL_TRUNK_HEIGHT) / (treeHeight - VIRTUAL_TRUNK_HEIGHT) * 0.3;
+                    const L_FOLIAGE = L_FOLIAGE_BASE + L_FOLIAGE_GRADIENT + (Math.random() * 0.05); 
+
+                    if (y > VIRTUAL_TRUNK_HEIGHT) {
+                        // 树叶部分
+                        hue = H_FOLIAGE; saturation = S_FOLIAGE; lightness = L_FOLIAGE;
+                    } else {
+                        // 树干到树叶的过渡区 (0 <= y <= VIRTUAL_TRUNK_HEIGHT)
+                        const alphaColor = y / VIRTUAL_TRUNK_HEIGHT; 
+
+                        // 线性混合颜色
+                        hue = H_TRUNK + (H_FOLIAGE - H_TRUNK) * alphaColor;
+                        saturation = S_TRUNK + (S_FOLIAGE - S_TRUNK) * alphaColor;
+                        lightness = L_TRUNK + (L_FOLIAGE - L_TRUNK) * alphaColor;
+                    }
+                    
+                    color.setHSL(hue, saturation, lightness);
+                }
+                
+                colors.push(color.r, color.g, color.b);
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+
+            const particleMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: new THREE.Color(0xffffff) },
+                    pointTexture: { value: createParticleTexture() }, 
+                    alphaTest: { value: 0.9 }
+                },
+                vertexShader: `
+                    attribute float size;
+                    varying vec3 vColor;
+                    void main() {
+                        vColor = color;
+                        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+                        gl_PointSize = size * ( 150.0 / -mvPosition.z ); 
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    uniform sampler2D pointTexture;
+                    varying vec3 vColor;
+                    void main() {
+                        gl_FragColor = vec4( color * vColor, 1.0 );
+                        gl_FragColor = gl_FragColor * texture2D( pointTexture, gl_PointCoord );
+                        if (gl_FragColor.a < 0.1) discard; 
+                    }
+                `,
+                blending: THREE.AdditiveBlending, 
+                depthWrite: false,
+                transparent: true,
+                vertexColors: true 
+            });
+
+            particleTree = new THREE.Points(geometry, particleMaterial);
+            scene.add(particleTree);
+        }
+        
+        // --- Heart Topper ---
+        function createHeartTopper() {
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const colors = [];
+            const sizes = [];
+            
+            const originalPositions = [];
+            geometry.userData = { originalPositions }; 
+
+            const color = new THREE.Color();
+            const heartScale = params.HEART_SCALE; 
+            const treeHeight = params.TREE_HEIGHT; 
+            
+            // 爱心形状在自身坐标系中的最低点 Y 约为 -17
+            const unscaledBottomTipY = -17; 
+            
+            // 缩放后，从爱心中心到最低点的距离
+            const scaledBottomTipOffset = Math.abs(unscaledBottomTipY) / heartScale; 
+            
+            // 爱心中心 Y 坐标：树顶 (TREE_HEIGHT + TREE_BASE_Y) + 底部尖端偏移量 - 0.2 (微小的连接重叠)
+            const heartY = (treeHeight + TREE_BASE_Y) + scaledBottomTipOffset - 0.2; 
+            
+            for (let i = 0; i < params.heartParticleCount; i++) {
+                let x, y, z;
+                
+                const t = Math.random() * 2 * Math.PI - Math.PI; 
+                const u = Math.random() * Math.PI; 
+
+                x = 16 * Math.sin(t)**3 * Math.sin(u);
+                y = (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)) * Math.sin(u);
+                z = 16 * Math.sin(t)**3 * Math.cos(u) * 0.3; 
+
+                x += (Math.random() - 0.5) * 0.3; 
+                y += (Math.random() - 0.5) * 0.3;
+                z += (Math.random() - 0.5) * 0.15;
+                
+                positions.push(x / heartScale, y / heartScale + heartY, z / heartScale);
+                originalPositions.push(x / heartScale, y / heartScale + heartY, z / heartScale);
+
+                const hue = 0.95 + Math.random() * 0.05; 
+                const saturation = 1.0;
+                const lightness = 0.6 + Math.random() * 0.15; 
+                color.setHSL(hue, saturation, lightness);
+                colors.push(color.r, color.g, color.b);
+
+                sizes.push(Math.random() * 0.9 + 0.4); 
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+            
+            const heartMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: new THREE.Color(0xffffff) },
+                    pointTexture: { value: createParticleTexture() },
+                    alphaTest: { value: 0.9 }
+                },
+                vertexShader: `
+                    attribute float size;
+                    varying vec3 vColor;
+                    void main() {
+                        vColor = color;
+                        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+                        gl_PointSize = size * ( 150.0 / -mvPosition.z );
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    uniform sampler2D pointTexture;
+                    varying vec3 vColor;
+                    void main() {
+                        gl_FragColor = vec4( color * vColor, 1.0 );
+                        gl_FragColor = gl_FragColor * texture2D( pointTexture, gl_PointCoord );
+                        gl_FragColor.a *= 0.7; 
+                        if (gl_FragColor.a < 0.1) discard; 
+                    }
+                `,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                vertexColors: true 
+            });
+
+            heartTopper = new THREE.Points(geometry, heartMaterial);
+            scene.add(heartTopper);
+        }
+
+        // --- Magic Particle System ---
+        function createMagicDust() {
+            const particleGeo = new THREE.BufferGeometry();
+            const particleCount = params.magicCount;
+            
+            const positions = [];
+            const speeds = []; 
+            const radii = [];  
+            const yOffsets = []; 
+            
+            for (let i = 0; i < particleCount; i++) {
+                positions.push(0, 0, 0);
+                
+                speeds.push((Math.random() + 0.5) * 0.6); 
+                // 环绕粒子半径
+                radii.push(Math.random() * 7 + params.MAGIC_BASE_RADIUS); 
+                yOffsets.push(Math.random() * 18); 
+            }
+
+            particleGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            particleGeo.userData = { speeds, radii, yOffsets };
+
+            // 环绕粒子使用金色
+            const particleMat = new THREE.PointsMaterial({
+                color: 0xffd700, 
+                size: 0.6, 
+                transparent: true,
+                opacity: 0.7, 
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                map: createParticleTexture()
+            });
+
+            magicParticles = new THREE.Points(particleGeo, particleMat);
+            scene.add(magicParticles);
+        }
+
+        // --- Snow System ---
+        function createSnowSystem() {
+            snowGeo = new THREE.BufferGeometry();
+            const positions = [];
+            const velocities = [];
+            const sizes = []; 
+            const snowRange = 90; 
+
+            for (let i = 0; i < params.snowCount; i++) {
+                positions.push(
+                    (Math.random() - 0.5) * snowRange, 
+                    Math.random() * 60, 
+                    (Math.random() - 0.5) * snowRange
+                );
+                velocities.push(
+                    (Math.random() - 0.5) * 0.08, 
+                    -(Math.random() * 0.15 + 0.08), 
+                    (Math.random() - 0.5) * 0.08
+                );
+                
+                // --- MODIFICATION: 雪花粒子调大调大调大 ---
+                sizes.push(Math.random() * 4.0 + 2.0); // 范围 2.0 到 6.0
+                // --- END MODIFICATION ---
+            }
+
+            snowGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            snowGeo.setAttribute('velocity', new THREE.Float32BufferAttribute(velocities, 3));
+            snowGeo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1)); 
+
+            const snowMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: new THREE.Color(0xffffff) },
+                    pointTexture: { value: createSnowflakeTexture() }, // 使用棱角贴图
+                    alphaTest: { value: 0.9 }
+                },
+                vertexShader: `
+                    attribute float size;
+                    void main() {
+                        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+                        gl_PointSize = size * ( 150.0 / -mvPosition.z ); 
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    uniform sampler2D pointTexture;
+                    void main() {
+                        gl_FragColor = vec4( color, 1.0 );
+                        gl_FragColor = gl_FragColor * texture2D( pointTexture, gl_PointCoord );
+                        gl_FragColor.a *= 0.8; 
+                        if (gl_FragColor.a < 0.1) discard; 
+                    }
+                `,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+            });
+
+            snowSystem = new THREE.Points(snowGeo, snowMat);
+            scene.add(snowSystem);
+        }
+        
+        // --- Music Control ---
+        function setupMusicControl() {
+            const music = document.getElementById('bgMusic');
+            const playBtn = document.getElementById('musicPlayBtn');
+            const icon = playBtn.querySelector('i');
+            // 获取新的进度条元素
+            const progressBarContainer = document.getElementById('audio-progress-bar-container');
+            const progressBarFill = document.getElementById('audio-progress-bar-fill');
+            
+            let isPlaying = false; 
+
+            music.volume = 0.5;
+
+            // 1. 监听音频时间更新，以更新进度条
+            music.addEventListener('timeupdate', () => {
+                if (!isNaN(music.duration) && music.duration > 0) {
+                    const percentage = (music.currentTime / music.duration) * 100;
+                    progressBarFill.style.width = `${percentage}%`;
+                    progressBarContainer.setAttribute('aria-valuenow', percentage.toFixed(0));
+                }
+            });
+
+            // 2. 监听进度条点击，实现跳转播放 (Seeking)
+            progressBarContainer.addEventListener('click', (e) => {
+                if (isNaN(music.duration) || music.duration === 0) return;
+                
+                // 计算点击相对于容器左侧的偏移量
+                const rect = progressBarContainer.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                
+                // 计算点击位置占总宽度的百分比
+                const percentage = clickX / rect.width;
+                
+                // 设置新的播放时间
+                music.currentTime = music.duration * percentage;
+            });
+
+            // 监听音频是否已准备好播放（至少加载了元数据）
+            music.addEventListener('loadedmetadata', () => {
+                 console.log('Audio metadata loaded. Ready for user interaction.');
+            });
+
+            // 监听错误事件
+            music.addEventListener('error', (e) => {
+                let errorMessage = 'Unknown audio error.';
+                // 检查 mediaError 对象
+                if (music.error) {
+                    switch (music.error.code) {
+                        case music.error.MEDIA_ERR_ABORTED:
+                            errorMessage = 'Playback aborted by user.';
+                            break;
+                        case music.error.MEDIA_ERR_NETWORK:
+                            errorMessage = 'Network error during download.';
+                            break;
+                        case music.error.MEDIA_ERR_DECODE:
+                            errorMessage = 'Audio decoding error (unsupported format or corruption).';
+                            break;
+                        case music.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                            errorMessage = 'Audio source not supported by the browser (codec/format issue).';
+                            break;
+                    }
+                }
+                console.error(`Audio Playback Error (${music.error ? music.error.code : 'N/A'}): ${errorMessage}. Please check the URL and file format.`, e);
+                // 确保在出错时，状态和UI都重置为暂停
+                isPlaying = false;
+                icon.className = 'fas fa-play';
+                playBtn.classList.remove('playing');
+            });
+            
+            // 修正后的点击事件处理，使用 isPlaying 状态防止竞态条件
+            playBtn.addEventListener('click', () => {
+                if (isPlaying) {
+                    // 如果我们认为它正在播放，则执行暂停
+                    music.pause();
+                    isPlaying = false;
+                    icon.className = 'fas fa-pause';
+                    playBtn.classList.remove('playing');
+                } else {
+                    // 如果我们认为它已暂停，则尝试播放
+                    music.play().then(() => {
+                        // 播放成功时才更新状态
+                        isPlaying = true; 
+                        icon.className = 'fas fa-pause';
+                        playBtn.classList.add('playing');
+                    }).catch(e => {
+                        // 播放失败处理，包括被中断的错误 (AbortError)
+                        if (e.name === 'AbortError') {
+                             console.warn('Playback interrupted (often by a rapid second click). State remains paused.');
+                        } else {
+                            console.error('Failed to start playback after click. Check the console for more detailed Audio Errors.', e);
+                        }
+                        
+                        // 确保状态和UI在任何失败情况下都保持暂停
+                        isPlaying = false; 
+                        icon.className = 'fas fa-play';
+                        playBtn.classList.remove('playing');
+                    });
+                }
+            });
+
+            // 初始化图标状态 (默认暂停/播放)
+            if (music.paused) {
+                icon.className = 'fas fa-play';
+                playBtn.classList.remove('playing');
+                isPlaying = false;
+            } else {
+                icon.className = 'fas fa-pause';
+                playBtn.classList.add('playing');
+                isPlaying = true;
+            }
+        }
+
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            
+            const treeHeight = params.TREE_HEIGHT; 
+            const color = new THREE.Color();
+
+            // 1. Particle Tree Sway & Pulse
+            if (particleTree) {
+                const positions = particleTree.geometry.attributes.position.array;
+                const colors = particleTree.geometry.attributes.color.array;
+                const originalPositions = particleTree.geometry.userData.originalPositions;
+                const initialOffsets = particleTree.geometry.userData.initialOffsets;
+                const totalParticles = originalPositions.length / 3;
+
+                const windStrength = 0.3; 
+                const windSpeed = 0.6; 
+                
+                const twinklePulse = Math.sin(time * 8) * 0.5 + 0.5; 
+
+                for (let i = 0; i < totalParticles; i++) {
+                    const i3 = i * 3;
+                    
+                    // originalY 包含了 TREE_BASE_Y 偏移
+                    const originalY = originalPositions[i3 + 1]; 
+                    
+                    // 摇摆和脉冲仍然只基于树的相对高度 (y - TREE_BASE_Y)
+                    const treeRelativeY = originalY - TREE_BASE_Y;
+                    
+                    const originalX = originalPositions[i3];
+                    const originalZ = originalPositions[i3 + 2];
+                    
+                    // 归一化 Y 坐标 (0 到 1)
+                    const yNormalized = treeRelativeY / (treeHeight + VIRTUAL_TRUNK_HEIGHT); 
+                    const swayAmplitude = windStrength * yNormalized; 
+
+                    const swayX = Math.sin(time * windSpeed + initialOffsets[i] * 0.5) * swayAmplitude;
+                    const swayZ = Math.cos(time * windSpeed + initialOffsets[i] * 0.5) * swayAmplitude * 0.5;
+                    
+                    const internalWaviness = Math.sin(time * 5.0 + originalX * 0.5 + originalZ * 0.5 + initialOffsets[i]) * 0.5 * (1.0 - yNormalized);
+                    
+                    positions[i3] = originalX + swayX + internalWaviness * Math.cos(initialOffsets[i]);
+                    // Y轴波动也基于相对高度
+                    positions[i3 + 1] = originalY + Math.sin(time * 3 + initialOffsets[i]) * 0.1; 
+                    positions[i3 + 2] = originalZ + swayZ + internalWaviness * Math.sin(initialOffsets[i]);
+                    
+                    
+                    // 装饰灯闪烁逻辑 (不变)
+                    color.setRGB(colors[i3], colors[i3+1], colors[i3+2]);
+                    
+                    if (color.h < 0.2 || color.h > 0.95) { 
+                        let h, s, l;
+                        color.getHSL(color);
+                        h = color.h;
+                        s = color.s;
+                        l = color.l;
+                        
+                        if (h > 0.9 || h < 0.05) { // 红色装饰灯
+                            l = Math.min(l * (1.0 + twinklePulse * 0.3), 1.0); 
+                            
+                            color.setHSL(h, s, l);
+                            
+                            colors[i3] = color.r;
+                            colors[i3 + 1] = color.g;
+                            colors[i3 + 2] = color.b;
+                        }
+                    }
+                }
+                particleTree.geometry.attributes.position.needsUpdate = true;
+                particleTree.geometry.attributes.color.needsUpdate = true; 
+                
+                particleTree.rotation.y = time * 0.03; 
+            }
+
+            // 2. Heart Rotation 
+            if (heartTopper) {
+                heartTopper.rotation.y += params.heartRotationSpeed; 
+                
+                // 颜色闪烁
+                const colorAttribute = heartTopper.geometry.attributes.color;
+                const colors = colorAttribute.array;
+                const lightnessBoost = 0.12 + Math.sin(time * 10) * 0.12; 
+                for (let i = 0; i < colors.length / 3; i++) {
+                    const h = 0.95;
+                    const s = 1.0;
+                    const l = 0.6 + lightnessBoost * (1 - (i % 10) / 10); 
+                    color.setHSL(h, s, l);
+                    colors[i * 3] = color.r;
+                    colors[i * 3 + 1] = color.g;
+                    colors[i * 3 + 2] = color.b;
+                }
+                colorAttribute.needsUpdate = true;
+            }
+            
+            // 3. Update Snow
+            if (snowGeo) {
+                const positions = snowGeo.attributes.position.array;
+                const velocities = snowGeo.attributes.velocity.array;
+                const snowRange = 90;
+
+                for (let i = 0; i < params.snowCount; i++) {
+                    const i3 = i * 3;
+                    positions[i3] += velocities[i3] + Math.sin(time * 0.5 + positions[i3+1]) * 0.02;
+                    positions[i3+1] += velocities[i3+1];
+                    positions[i3+2] += velocities[i3+2] + Math.cos(time * 0.5 + positions[i3+1]) * 0.02;
+                    
+                    if (positions[i3+1] < 0) {
+                        positions[i3+1] = 60; 
+                        positions[i3] = (Math.random() - 0.5) * snowRange;
+                        positions[i3+2] = (Math.random() - 0.5) * snowRange;
+                    }
+                }
+                snowGeo.attributes.position.needsUpdate = true;
+            }
+
+            // 4. Update Magic Particles 
+            if (magicParticles) {
+                const positions = magicParticles.geometry.attributes.position.array;
+                const { speeds, radii, yOffsets } = magicParticles.geometry.userData;
+                
+                const rotationSpeedFactor = 0.5; // 减慢旋转速度
+                
+                for (let i = 0; i < params.magicCount; i++) {
+                    const i3 = i * 3;
+                    const angle = time * speeds[i] * rotationSpeedFactor + i; 
+                    
+                    // 粒子在 Y=0 到 Y=20 之间循环，所以半径在上升过程中不会衰减
+                    const radius = radii[i]; 
+                    
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
+                    
+                    // 粒子绕树底上升和螺旋 (Y 轴循环高度不变，但起始点在 TREE_BASE_Y)
+                    positions[i3] = x;
+                    positions[i3 + 1] = (yOffsets[i] + time * speeds[i] * 1.5) % (treeHeight * 0.8) + TREE_BASE_Y; 
+                    positions[i3 + 2] = z;
+                }
+                magicParticles.geometry.attributes.position.needsUpdate = true;
+            }
+
+            // 5. Update Wave Base (圆形传播波纹)
+            if (waveBase) {
+                const positions = waveBase.geometry.attributes.position.array;
+                const initialRadius = waveBase.geometry.userData.initialRadius;
+                const totalParticles = initialRadius.length;
+                const speed = 0.5;
+                const waveLength = 0.15; 
+                const amplitude = 3.0; 
+
+                for (let i = 0; i < totalParticles; i++) {
+                    const i3 = i * 3;
+                    const r = initialRadius[i];
+                    
+                    const waveFactor = Math.sin((r * waveLength - time * speed) * Math.PI) * amplitude;
+                    
+                    // 波浪基座保持在 Y=0
+                    positions[i3 + 1] = waveFactor * Math.exp(-0.01 * r); 
+                }
+                waveBase.geometry.attributes.position.needsUpdate = true;
+            }
+            
+            // Final render and control update
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Initialize on load ---
+        window.onload = function () {
+            init();
+            animate(); 
+        }
+    </script>
+</body>
+</html>
